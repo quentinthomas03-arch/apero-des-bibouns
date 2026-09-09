@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Apéro des Bibouns</title>
+<meta name="theme-color" content="#ff206e" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ===== SETUP SCREEN ===== -->
+<section id="screen-setup" class="screen active">
+  <div class="card">
+    <h1>🍹 Apéro des Bibouns 🎉</h1>
+    <p class="subtitle">Le quiz culture G, sans pub ni traçage.</p>
+
+    <h2>Joueurs</h2>
+    <div class="add-player-row">
+      <input id="player-name-input" type="text" placeholder="Prénom du joueur" maxlength="20" />
+      <button id="add-player-btn" class="btn btn-secondary">Ajouter</button>
+    </div>
+    <ul id="player-list" class="player-list"></ul>
+
+    <h2>Nombre de questions</h2>
+    <div class="count-row">
+      <button class="count-btn selected" data-count="10">10</button>
+      <button class="count-btn" data-count="20">20</button>
+      <button class="count-btn" data-count="30">30</button>
+      <button class="count-btn" data-count="50">50</button>
+    </div>
+
+    <button id="start-game-btn" class="btn btn-primary btn-large" disabled>🚀 Lancer la partie</button>
+  </div>
+</section>
+
+<!-- ===== GAME SCREEN ===== -->
+<section id="screen-game" class="screen">
+  <div class="card">
+    <div class="game-header">
+      <span id="progress" class="progress"></span>
+      <span id="category-badge" class="badge"></span>
+    </div>
+    <h2 id="turn-player" class="turn-player"></h2>
+
+    <div class="question-box">
+      <p id="question-text" class="question-text"></p>
+    </div>
+
+    <div id="answer-box" class="answer-box hidden">
+      <span class="answer-label">Réponse</span>
+      <p id="answer-text" class="answer-text"></p>
+    </div>
+
+    <button id="reveal-btn" class="btn btn-primary btn-large">👁️ Révéler la réponse</button>
+
+    <div id="judge-buttons" class="judge-buttons hidden">
+      <button id="wrong-btn" class="btn btn-wrong">❌ Mauvaise réponse</button>
+      <button id="correct-btn" class="btn btn-correct">✅ Bonne réponse</button>
+    </div>
+
+    <div id="mini-scores" class="mini-scores"></div>
+  </div>
+</section>
+
+<!-- ===== END SCREEN ===== -->
+<section id="screen-end" class="screen">
+  <div class="card">
+    <h1>🏆 Résultats</h1>
+    <ul id="final-scores" class="final-scores"></ul>
+    <button id="replay-btn" class="btn btn-primary btn-large">🔁 Rejouer (mêmes joueurs)</button>
+    <button id="new-game-btn" class="btn btn-secondary">👥 Changer les joueurs</button>
+  </div>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

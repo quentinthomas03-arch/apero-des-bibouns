@@ -1,5 +1,25 @@
 import { QUESTIONS, CATEGORIES } from "./questions.js";
 
+// ---------- Config ----------
+const ROUND_SIZE = 5; // nombre de questions consécutives par joueur avant de tourner
+const BONUS_RATIO = 6; // environ 1 question sur 6 est bonus (x2 points)
+
+const WELCOME_PHRASES = [
+  "Que le meilleur des Bibouns gagne !",
+  "Que la culture G soit avec vous !",
+  "Prêts à briller ou à rougir ?",
+  "L'apéro attend, la partie commence !",
+  "Que les neurones chauffent !",
+  "Un peu de sérieux... juste un peu !",
+  "Le savoir, ça se fête !",
+  "Que le meilleur bluffeur perde !",
+  "Allez, on sort le cerveau du frigo !",
+  "Ici, on ne triche que sur les glaçons !",
+  "Que la mémoire soit avec vous !",
+  "Le trophée de Biboun de l'année se joue maintenant !",
+  "Respirez, ça va piquer un peu !",
+];
+
 // ---------- Utils ----------
 function shuffle(array) {
   const a = array.slice();
@@ -10,6 +30,10 @@ function shuffle(array) {
   return a;
 }
 
+function pickRandom(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
 function $(sel, root = document) {
   return root.querySelector(sel);
 }
@@ -18,20 +42,25 @@ function $all(sel, root = document) {
 }
 
 // ---------- State ----------
-const STORAGE_KEY = "apero-bibouns-players";
+const PLAYERS_KEY = "apero-bibouns-players";
+const USED_KEY = "apero-bibouns-used-questions";
 
 const state = {
   players: [], // [{ name, score }]
-  currentPlayerIndex: 0,
   questionCount: 20,
-  gameQuestions: [],
+  gameQuestions: [], // [{ cat, q, a, bonus }]
   currentQuestionIndex: 0,
   answered: false,
 };
 
+function currentPlayerIndex() {
+  if (state.players.length === 0) return 0;
+  return Math.floor(state.currentQuestionIndex / ROUND_SIZE) % state.players.length;
+}
+
 function loadSavedPlayers() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(PLAYERS_KEY);
     if (!raw) return [];
     const names = JSON.parse(raw);
     if (Array.isArray(names)) return names;
@@ -43,10 +72,54 @@ function loadSavedPlayers() {
 
 function savePlayerNames() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.players.map((p) => p.name)));
+    localStorage.setItem(PLAYERS_KEY, JSON.stringify(state.players.map((p) => p.name)));
   } catch (e) {
     /* ignore */
   }
+}
+
+// ---------- Anti-repetition across sessions ----------
+function loadUsedQuestions() {
+  try {
+    const raw = localStorage.getItem(USED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set(arr);
+  } catch (e) {
+    /* ignore */
+  }
+  return new Set();
+}
+
+function saveUsedQuestions(set) {
+  try {
+    localStorage.setItem(USED_KEY, JSON.stringify(Array.from(set)));
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function assignBonusQuestions(questions) {
+  if (questions.length === 0) return questions;
+  const bonusCount = Math.max(1, Math.round(questions.length / BONUS_RATIO));
+  const bonusIndices = new Set(shuffle(questions.map((_, i) => i)).slice(0, bonusCount));
+  return questions.map((q, i) => ({ ...q, bonus: bonusIndices.has(i) }));
+}
+
+function buildGamePool(count) {
+  const used = loadUsedQuestions();
+  let fresh = QUESTIONS.filter((q) => !used.has(q.q));
+
+  // Pas assez de questions inédites restantes : on repart sur tout le stock
+  if (fresh.length < count) {
+    used.clear();
+    fresh = QUESTIONS.slice();
+  }
+
+  const picked = shuffle(fresh).slice(0, Math.min(count, fresh.length));
+  picked.forEach((q) => used.add(q.q));
+  saveUsedQuestions(used);
+  return assignBonusQuestions(picked);
 }
 
 // ---------- Screens ----------
@@ -128,9 +201,12 @@ function updateStartButton() {
 startBtn.addEventListener("click", startGame);
 
 // ---------- Game screen ----------
+const turnBannerEl = $("#turn-banner");
 const turnPlayerEl = $("#turn-player");
+const roundDotsEl = $("#round-dots");
 const progressEl = $("#progress");
 const categoryBadgeEl = $("#category-badge");
+const bonusBadgeEl = $("#bonus-badge");
 const questionTextEl = $("#question-text");
 const answerTextEl = $("#answer-text");
 const answerBox = $("#answer-box");
@@ -139,42 +215,70 @@ const judgeButtons = $("#judge-buttons");
 const correctBtn = $("#correct-btn");
 const wrongBtn = $("#wrong-btn");
 const miniScoreEl = $("#mini-scores");
+const stealPanel = $("#steal-panel");
+const stealButtonsEl = $("#steal-buttons");
+const stealNoneBtn = $("#steal-none-btn");
 
 function startGame() {
   // reset scores for a fresh game, keep names
   state.players.forEach((p) => (p.score = 0));
-  state.currentPlayerIndex = 0;
   state.currentQuestionIndex = 0;
   state.answered = false;
-
-  const pool = shuffle(QUESTIONS);
-  state.gameQuestions = pool.slice(0, Math.min(state.questionCount, pool.length));
+  state.gameQuestions = buildGamePool(state.questionCount);
 
   showScreen("game");
-  renderQuestion();
+  renderQuestion({ announcePlayer: true, isGameStart: true });
 }
 
 function renderMiniScores() {
+  const activeIdx = currentPlayerIndex();
   miniScoreEl.innerHTML = state.players
-    .map((p, i) => `<span class="mini-score${i === state.currentPlayerIndex ? " active" : ""}">${escapeHtml(p.name)}: ${p.score}</span>`)
+    .map((p, i) => `<span class="mini-score${i === activeIdx ? " active" : ""}">${escapeHtml(p.name)}: ${p.score}</span>`)
     .join("");
 }
 
-function renderQuestion() {
+function renderRoundDots() {
+  const posInRound = state.currentQuestionIndex % ROUND_SIZE;
+  let dots = "";
+  for (let i = 0; i < ROUND_SIZE; i++) {
+    dots += `<span class="dot${i < posInRound ? " done" : ""}${i === posInRound ? " current" : ""}"></span>`;
+  }
+  roundDotsEl.innerHTML = dots;
+}
+
+function renderQuestion({ announcePlayer = false, isGameStart = false } = {}) {
   const q = state.gameQuestions[state.currentQuestionIndex];
-  const player = state.players[state.currentPlayerIndex];
+  const player = state.players[currentPlayerIndex()];
   const cat = CATEGORIES[q.cat] || { label: q.cat, emoji: "❓" };
 
-  turnPlayerEl.textContent = `🎤 Au tour de : ${player.name}`;
+  turnPlayerEl.textContent = `🎤 ${player.name}`;
   progressEl.textContent = `Question ${state.currentQuestionIndex + 1} / ${state.gameQuestions.length}`;
   categoryBadgeEl.textContent = `${cat.emoji} ${cat.label}`;
+  bonusBadgeEl.classList.toggle("hidden", !q.bonus);
   questionTextEl.textContent = q.q;
   answerTextEl.textContent = q.a;
   answerBox.classList.add("hidden");
   revealBtn.classList.remove("hidden");
   judgeButtons.classList.add("hidden");
+  stealPanel.classList.add("hidden");
   state.answered = false;
+  renderRoundDots();
   renderMiniScores();
+
+  if (announcePlayer) {
+    const phrase = isGameStart ? pickRandom(WELCOME_PHRASES) : null;
+    flashPlayerBanner(player.name, phrase);
+  }
+}
+
+function flashPlayerBanner(name, welcomePhrase) {
+  turnBannerEl.innerHTML = welcomePhrase
+    ? `🎉 ${escapeHtml(welcomePhrase)}<br>🎤 Au tour de ${escapeHtml(name)} !`
+    : `🔄 Au tour de ${escapeHtml(name)} !`;
+  turnBannerEl.classList.remove("show");
+  // force reflow so the animation can replay
+  void turnBannerEl.offsetWidth;
+  turnBannerEl.classList.add("show");
 }
 
 revealBtn.addEventListener("click", () => {
@@ -183,27 +287,66 @@ revealBtn.addEventListener("click", () => {
   judgeButtons.classList.remove("hidden");
 });
 
+function pointsForCurrentQuestion() {
+  const q = state.gameQuestions[state.currentQuestionIndex];
+  return q.bonus ? 2 : 1;
+}
+
 function judge(isCorrect) {
   if (state.answered) return;
   state.answered = true;
+
   if (isCorrect) {
-    state.players[state.currentPlayerIndex].score += 1;
+    state.players[currentPlayerIndex()].score += pointsForCurrentQuestion();
+    nextTurn();
+  } else {
+    offerSteal();
   }
-  nextTurn();
 }
 
 correctBtn.addEventListener("click", () => judge(true));
 wrongBtn.addEventListener("click", () => judge(false));
 
+function offerSteal() {
+  judgeButtons.classList.add("hidden");
+
+  if (state.players.length < 2) {
+    nextTurn();
+    return;
+  }
+
+  const activeIdx = currentPlayerIndex();
+  stealButtonsEl.innerHTML = "";
+  state.players.forEach((p, i) => {
+    if (i === activeIdx) return;
+    const btn = document.createElement("button");
+    btn.textContent = escapeHtml(p.name);
+    btn.addEventListener("click", () => {
+      p.score += pointsForCurrentQuestion();
+      stealPanel.classList.add("hidden");
+      nextTurn();
+    });
+    stealButtonsEl.appendChild(btn);
+  });
+  stealPanel.classList.remove("hidden");
+}
+
+stealNoneBtn.addEventListener("click", () => {
+  stealPanel.classList.add("hidden");
+  nextTurn();
+});
+
 function nextTurn() {
+  const previousPlayerIdx = currentPlayerIndex();
   state.currentQuestionIndex += 1;
-  state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
 
   if (state.currentQuestionIndex >= state.gameQuestions.length) {
     endGame();
     return;
   }
-  renderQuestion();
+
+  const newPlayerIdx = currentPlayerIndex();
+  renderQuestion({ announcePlayer: newPlayerIdx !== previousPlayerIdx });
 }
 
 // ---------- End screen ----------

@@ -13,6 +13,8 @@
 </head>
 <body>
 
+<div id="turn-banner" class="turn-banner"></div>
+
 <!-- ===== SETUP SCREEN ===== -->
 <section id="screen-setup" class="screen active">
   <div class="card">
@@ -45,7 +47,9 @@
       <span id="progress" class="progress"></span>
       <span id="category-badge" class="badge"></span>
     </div>
+    <span id="bonus-badge" class="bonus-badge hidden">⭐ QUESTION BONUS x2 !</span>
     <h2 id="turn-player" class="turn-player"></h2>
+    <div id="round-dots" class="round-dots"></div>
 
     <div class="question-box">
       <p id="question-text" class="question-text"></p>
@@ -61,6 +65,12 @@
     <div id="judge-buttons" class="judge-buttons hidden">
       <button id="wrong-btn" class="btn btn-wrong">❌ Mauvaise réponse</button>
       <button id="correct-btn" class="btn btn-correct">✅ Bonne réponse</button>
+    </div>
+
+    <div id="steal-panel" class="steal-panel hidden">
+      <p class="steal-title">🎯 Quelqu'un a trouvé avant la révélation ?</p>
+      <div id="steal-buttons" class="steal-buttons"></div>
+      <button id="steal-none-btn" class="btn btn-secondary">Personne n'a trouvé</button>
     </div>
 
     <div id="mini-scores" class="mini-scores"></div>

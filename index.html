@@ -13,6 +13,22 @@
 </head>
 <body>
 
+<div id="debug-error" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:#fff;padding:14px;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:50vh;overflow:auto;"></div>
+<script>
+  function showDebugError(msg) {
+    var el = document.getElementById('debug-error');
+    if (!el) return;
+    el.style.display = 'block';
+    el.textContent = (el.textContent ? el.textContent + '\n---\n' : '') + msg;
+  }
+  window.addEventListener('error', function (e) {
+    showDebugError('ERREUR JS : ' + e.message + '\nFichier : ' + e.filename + '\nLigne : ' + e.lineno + ':' + e.colno);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    showDebugError('PROMESSE REJETÉE : ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+</script>
+
 <div id="turn-banner" class="turn-banner"></div>
 
 <!-- ===== SETUP SCREEN ===== -->

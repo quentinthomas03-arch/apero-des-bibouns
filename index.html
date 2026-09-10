@@ -43,6 +43,9 @@
 <!-- ===== GAME SCREEN ===== -->
 <section id="screen-game" class="screen">
   <div class="card">
+    <div class="overall-progress-track">
+      <div id="overall-progress-fill" class="overall-progress-fill"></div>
+    </div>
     <div class="game-header">
       <span id="progress" class="progress"></span>
       <span id="category-badge" class="badge"></span>
@@ -79,6 +82,7 @@
 
 <!-- ===== END SCREEN ===== -->
 <section id="screen-end" class="screen">
+  <canvas id="confetti-canvas"></canvas>
   <div class="card">
     <h1>🏆 Résultats</h1>
     <ul id="final-scores" class="final-scores"></ul>

@@ -41,6 +41,59 @@ function $all(sel, root = document) {
   return Array.from(root.querySelectorAll(sel));
 }
 
+// ---------- Sound (synthétisé, pas de fichier audio) ----------
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+function playTone(freq, startOffset, duration, type = "sine", gainValue = 0.15) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const startTime = ctx.currentTime + startOffset;
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(gainValue, startTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(startTime);
+  osc.stop(startTime + duration + 0.05);
+}
+
+function playSound(name) {
+  try {
+    if (name === "reveal") {
+      playTone(660, 0, 0.15, "sine", 0.1);
+    } else if (name === "correct") {
+      playTone(523.25, 0, 0.14, "triangle", 0.15);
+      playTone(783.99, 0.1, 0.22, "triangle", 0.15);
+    } else if (name === "wrong") {
+      playTone(180, 0, 0.28, "sawtooth", 0.12);
+    } else if (name === "bonus") {
+      playTone(523.25, 0, 0.1, "sine", 0.12);
+      playTone(659.25, 0.09, 0.1, "sine", 0.12);
+      playTone(783.99, 0.18, 0.18, "sine", 0.12);
+    } else if (name === "steal") {
+      playTone(440, 0, 0.1, "square", 0.1);
+      playTone(554.37, 0.08, 0.16, "square", 0.1);
+    }
+  } catch (e) {
+    /* ignore audio errors */
+  }
+}
+
 // ---------- State ----------
 const PLAYERS_KEY = "apero-bibouns-players";
 const USED_KEY = "apero-bibouns-used-questions";
@@ -204,9 +257,11 @@ startBtn.addEventListener("click", startGame);
 const turnBannerEl = $("#turn-banner");
 const turnPlayerEl = $("#turn-player");
 const roundDotsEl = $("#round-dots");
+const overallFillEl = $("#overall-progress-fill");
 const progressEl = $("#progress");
 const categoryBadgeEl = $("#category-badge");
 const bonusBadgeEl = $("#bonus-badge");
+const questionBoxEl = $(".question-box");
 const questionTextEl = $("#question-text");
 const answerTextEl = $("#answer-text");
 const answerBox = $("#answer-box");
@@ -220,6 +275,8 @@ const stealButtonsEl = $("#steal-buttons");
 const stealNoneBtn = $("#steal-none-btn");
 
 function startGame() {
+  getAudioCtx(); // débloque l'audio sur iOS via ce geste utilisateur
+
   // reset scores for a fresh game, keep names
   state.players.forEach((p) => (p.score = 0));
   state.currentQuestionIndex = 0;
@@ -227,7 +284,7 @@ function startGame() {
   state.gameQuestions = buildGamePool(state.questionCount);
 
   showScreen("game");
-  renderQuestion({ announcePlayer: true, isGameStart: true });
+  renderQuestion({ announcePlayer: true, isGameStart: true, skipFade: true });
 }
 
 function renderMiniScores() {
@@ -246,14 +303,22 @@ function renderRoundDots() {
   roundDotsEl.innerHTML = dots;
 }
 
-function renderQuestion({ announcePlayer = false, isGameStart = false } = {}) {
+function renderOverallProgress() {
+  const pct = ((state.currentQuestionIndex) / state.gameQuestions.length) * 100;
+  overallFillEl.style.width = `${pct}%`;
+}
+
+function applyQuestionContent() {
   const q = state.gameQuestions[state.currentQuestionIndex];
   const player = state.players[currentPlayerIndex()];
-  const cat = CATEGORIES[q.cat] || { label: q.cat, emoji: "❓" };
+  const cat = CATEGORIES[q.cat] || { label: q.cat, emoji: "❓", color: "var(--pink)" };
 
   turnPlayerEl.textContent = `🎤 ${player.name}`;
   progressEl.textContent = `Question ${state.currentQuestionIndex + 1} / ${state.gameQuestions.length}`;
   categoryBadgeEl.textContent = `${cat.emoji} ${cat.label}`;
+  categoryBadgeEl.style.background = `${cat.color}22`;
+  categoryBadgeEl.style.color = cat.color;
+  questionBoxEl.style.setProperty("--accent", cat.color);
   bonusBadgeEl.classList.toggle("hidden", !q.bonus);
   questionTextEl.textContent = q.q;
   answerTextEl.textContent = q.a;
@@ -263,7 +328,26 @@ function renderQuestion({ announcePlayer = false, isGameStart = false } = {}) {
   stealPanel.classList.add("hidden");
   state.answered = false;
   renderRoundDots();
+  renderOverallProgress();
   renderMiniScores();
+
+  if (q.bonus) {
+    playSound("bonus");
+  }
+}
+
+function renderQuestion({ announcePlayer = false, isGameStart = false, skipFade = false } = {}) {
+  const player = state.players[currentPlayerIndex()];
+
+  if (skipFade) {
+    applyQuestionContent();
+  } else {
+    questionBoxEl.classList.add("fade");
+    setTimeout(() => {
+      applyQuestionContent();
+      questionBoxEl.classList.remove("fade");
+    }, 160);
+  }
 
   if (announcePlayer) {
     const phrase = isGameStart ? pickRandom(WELCOME_PHRASES) : null;
@@ -282,6 +366,7 @@ function flashPlayerBanner(name, welcomePhrase) {
 }
 
 revealBtn.addEventListener("click", () => {
+  playSound("reveal");
   answerBox.classList.remove("hidden");
   revealBtn.classList.add("hidden");
   judgeButtons.classList.remove("hidden");
@@ -297,9 +382,11 @@ function judge(isCorrect) {
   state.answered = true;
 
   if (isCorrect) {
+    playSound("correct");
     state.players[currentPlayerIndex()].score += pointsForCurrentQuestion();
     nextTurn();
   } else {
+    playSound("wrong");
     offerSteal();
   }
 }
@@ -322,6 +409,7 @@ function offerSteal() {
     const btn = document.createElement("button");
     btn.textContent = escapeHtml(p.name);
     btn.addEventListener("click", () => {
+      playSound("steal");
       p.score += pointsForCurrentQuestion();
       stealPanel.classList.add("hidden");
       nextTurn();
@@ -341,6 +429,7 @@ function nextTurn() {
   state.currentQuestionIndex += 1;
 
   if (state.currentQuestionIndex >= state.gameQuestions.length) {
+    renderOverallProgress();
     endGame();
     return;
   }
@@ -353,6 +442,7 @@ function nextTurn() {
 const finalScoresEl = $("#final-scores");
 const replayBtn = $("#replay-btn");
 const newGameBtn = $("#new-game-btn");
+const confettiCanvas = $("#confetti-canvas");
 
 function endGame() {
   const sorted = state.players.slice().sort((a, b) => b.score - a.score);
@@ -361,6 +451,7 @@ function endGame() {
     .map((p, i) => `<li class="final-row">${medals[i] || "🎉"} <span>${escapeHtml(p.name)}</span> <strong>${p.score}</strong></li>`)
     .join("");
   showScreen("end");
+  launchConfetti();
 }
 
 replayBtn.addEventListener("click", () => {
@@ -372,6 +463,57 @@ newGameBtn.addEventListener("click", () => {
   renderPlayerList();
   showScreen("setup");
 });
+
+// ---------- Confetti (canvas, sans dépendance) ----------
+function launchConfetti() {
+  if (!confettiCanvas) return;
+  const ctx = confettiCanvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  confettiCanvas.width = w * dpr;
+  confettiCanvas.height = h * dpr;
+  confettiCanvas.style.width = `${w}px`;
+  confettiCanvas.style.height = `${h}px`;
+  ctx.scale(dpr, dpr);
+
+  const colors = ["#ff206e", "#ff6b35", "#ffd23f", "#06d6a0"];
+  const particles = Array.from({ length: 140 }, () => ({
+    x: Math.random() * w,
+    y: -20 - Math.random() * h * 0.5,
+    r: 4 + Math.random() * 5,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    vy: 2 + Math.random() * 3,
+    vx: -1.5 + Math.random() * 3,
+    rot: Math.random() * Math.PI,
+    vrot: -0.2 + Math.random() * 0.4,
+  }));
+
+  const startTime = performance.now();
+  const duration = 3200;
+
+  function frame(now) {
+    const elapsed = now - startTime;
+    ctx.clearRect(0, 0, w, h);
+    particles.forEach((p) => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rot += p.vrot;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6);
+      ctx.restore();
+    });
+    if (elapsed < duration) {
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
+  }
+  requestAnimationFrame(frame);
+}
 
 // ---------- Init ----------
 function init() {

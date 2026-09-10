@@ -531,8 +531,19 @@ function init() {
   renderPlayerList();
   showScreen("setup");
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  // Nettoyage défensif : on supprime tout ancien service worker / cache
+  // qui aurait pu rester coincé sur une version périmée de l'appli.
+  if ("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((regs) => regs.forEach((reg) => reg.unregister()))
+      .catch(() => {});
+  }
+  if (typeof caches !== "undefined" && caches.keys) {
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .catch(() => {});
   }
 }
 

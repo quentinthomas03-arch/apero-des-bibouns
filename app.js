@@ -44,15 +44,19 @@ function $all(sel, root = document) {
 // ---------- Sound (synthétisé, pas de fichier audio) ----------
 let audioCtx = null;
 function getAudioCtx() {
-  if (!audioCtx) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return null;
-    audioCtx = new Ctx();
+  try {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+  } catch (e) {
+    return null;
   }
-  if (audioCtx.state === "suspended") {
-    audioCtx.resume().catch(() => {});
-  }
-  return audioCtx;
 }
 
 function playTone(freq, startOffset, duration, type = "sine", gainValue = 0.15) {
@@ -104,11 +108,16 @@ const state = {
   gameQuestions: [], // [{ cat, q, a, bonus }]
   currentQuestionIndex: 0,
   answered: false,
+  answeringOverrideIndex: null, // si un joker a été utilisé sur cette question
 };
 
 function currentPlayerIndex() {
   if (state.players.length === 0) return 0;
   return Math.floor(state.currentQuestionIndex / ROUND_SIZE) % state.players.length;
+}
+
+function activeAnswererIndex() {
+  return state.answeringOverrideIndex !== null ? state.answeringOverrideIndex : currentPlayerIndex();
 }
 
 function loadSavedPlayers() {
@@ -266,6 +275,7 @@ const questionTextEl = $("#question-text");
 const answerTextEl = $("#answer-text");
 const answerBox = $("#answer-box");
 const revealBtn = $("#reveal-btn");
+const stealTriggerBtn = $("#steal-trigger-btn");
 const judgeButtons = $("#judge-buttons");
 const correctBtn = $("#correct-btn");
 const wrongBtn = $("#wrong-btn");
@@ -284,11 +294,11 @@ function startGame() {
   state.gameQuestions = buildGamePool(state.questionCount);
 
   showScreen("game");
-  renderQuestion({ announcePlayer: true, isGameStart: true, skipFade: true });
+  renderQuestion({ announcePlayer: true, isGameStart: true });
 }
 
 function renderMiniScores() {
-  const activeIdx = currentPlayerIndex();
+  const activeIdx = activeAnswererIndex();
   miniScoreEl.innerHTML = state.players
     .map((p, i) => `<span class="mini-score${i === activeIdx ? " active" : ""}">${escapeHtml(p.name)}: ${p.score}</span>`)
     .join("");
@@ -304,16 +314,27 @@ function renderRoundDots() {
 }
 
 function renderOverallProgress() {
-  const pct = ((state.currentQuestionIndex) / state.gameQuestions.length) * 100;
+  const pct = (state.currentQuestionIndex / state.gameQuestions.length) * 100;
   overallFillEl.style.width = `${pct}%`;
 }
 
-function applyQuestionContent() {
+function renderTurnLabel() {
+  const player = state.players[currentPlayerIndex()];
+  if (state.answeringOverrideIndex !== null) {
+    const thief = state.players[state.answeringOverrideIndex];
+    turnPlayerEl.textContent = `🎯 ${thief.name} tente sa chance !`;
+  } else {
+    turnPlayerEl.textContent = `🎤 ${player.name}`;
+  }
+}
+
+function renderQuestion({ announcePlayer = false, isGameStart = false } = {}) {
   const q = state.gameQuestions[state.currentQuestionIndex];
   const player = state.players[currentPlayerIndex()];
   const cat = CATEGORIES[q.cat] || { label: q.cat, emoji: "❓", color: "var(--pink)" };
 
-  turnPlayerEl.textContent = `🎤 ${player.name}`;
+  state.answeringOverrideIndex = null;
+  renderTurnLabel();
   progressEl.textContent = `Question ${state.currentQuestionIndex + 1} / ${state.gameQuestions.length}`;
   categoryBadgeEl.textContent = `${cat.emoji} ${cat.label}`;
   categoryBadgeEl.style.background = `${cat.color}22`;
@@ -324,29 +345,22 @@ function applyQuestionContent() {
   answerTextEl.textContent = q.a;
   answerBox.classList.add("hidden");
   revealBtn.classList.remove("hidden");
+  stealTriggerBtn.classList.toggle("hidden", state.players.length < 2);
   judgeButtons.classList.add("hidden");
   stealPanel.classList.add("hidden");
   state.answered = false;
+
+  // petite animation d'entrée, sans délai ni dépendance à un timer
+  questionBoxEl.classList.remove("pop-in");
+  void questionBoxEl.offsetWidth;
+  questionBoxEl.classList.add("pop-in");
+
   renderRoundDots();
   renderOverallProgress();
   renderMiniScores();
 
   if (q.bonus) {
     playSound("bonus");
-  }
-}
-
-function renderQuestion({ announcePlayer = false, isGameStart = false, skipFade = false } = {}) {
-  const player = state.players[currentPlayerIndex()];
-
-  if (skipFade) {
-    applyQuestionContent();
-  } else {
-    questionBoxEl.classList.add("fade");
-    setTimeout(() => {
-      applyQuestionContent();
-      questionBoxEl.classList.remove("fade");
-    }, 160);
   }
 
   if (announcePlayer) {
@@ -365,10 +379,36 @@ function flashPlayerBanner(name, welcomePhrase) {
   turnBannerEl.classList.add("show");
 }
 
+// ---------- Joker / vol AVANT révélation ----------
+stealTriggerBtn.addEventListener("click", () => {
+  const activeIdx = currentPlayerIndex();
+  stealButtonsEl.innerHTML = "";
+  state.players.forEach((p, i) => {
+    if (i === activeIdx) return;
+    const btn = document.createElement("button");
+    btn.textContent = escapeHtml(p.name);
+    btn.addEventListener("click", () => {
+      state.answeringOverrideIndex = i;
+      renderTurnLabel();
+      renderMiniScores();
+      stealPanel.classList.add("hidden");
+      playSound("steal");
+    });
+    stealButtonsEl.appendChild(btn);
+  });
+  stealPanel.classList.remove("hidden");
+});
+
+stealNoneBtn.addEventListener("click", () => {
+  stealPanel.classList.add("hidden");
+});
+
 revealBtn.addEventListener("click", () => {
   playSound("reveal");
   answerBox.classList.remove("hidden");
   revealBtn.classList.add("hidden");
+  stealTriggerBtn.classList.add("hidden");
+  stealPanel.classList.add("hidden");
   judgeButtons.classList.remove("hidden");
 });
 
@@ -383,46 +423,15 @@ function judge(isCorrect) {
 
   if (isCorrect) {
     playSound("correct");
-    state.players[currentPlayerIndex()].score += pointsForCurrentQuestion();
-    nextTurn();
+    state.players[activeAnswererIndex()].score += pointsForCurrentQuestion();
   } else {
     playSound("wrong");
-    offerSteal();
   }
+  nextTurn();
 }
 
 correctBtn.addEventListener("click", () => judge(true));
 wrongBtn.addEventListener("click", () => judge(false));
-
-function offerSteal() {
-  judgeButtons.classList.add("hidden");
-
-  if (state.players.length < 2) {
-    nextTurn();
-    return;
-  }
-
-  const activeIdx = currentPlayerIndex();
-  stealButtonsEl.innerHTML = "";
-  state.players.forEach((p, i) => {
-    if (i === activeIdx) return;
-    const btn = document.createElement("button");
-    btn.textContent = escapeHtml(p.name);
-    btn.addEventListener("click", () => {
-      playSound("steal");
-      p.score += pointsForCurrentQuestion();
-      stealPanel.classList.add("hidden");
-      nextTurn();
-    });
-    stealButtonsEl.appendChild(btn);
-  });
-  stealPanel.classList.remove("hidden");
-}
-
-stealNoneBtn.addEventListener("click", () => {
-  stealPanel.classList.add("hidden");
-  nextTurn();
-});
 
 function nextTurn() {
   const previousPlayerIdx = currentPlayerIndex();
